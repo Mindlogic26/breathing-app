@@ -1,17 +1,35 @@
-import { AnimatePresence, LayoutGroup, motion } from 'framer-motion'
-import { useState } from 'react'
+import { type PanInfo, AnimatePresence, LayoutGroup, motion } from 'framer-motion'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { BottomSheet } from './components/BottomSheet'
 import BreathingOrb from './components/BreathingOrb'
+import { OrbSessionRing } from './components/OrbSessionRing'
+import { type BreathPattern, ConfigDrawer } from './components/ConfigDrawer'
 import { FilmGrainOverlay } from './components/FilmGrainOverlay'
-import { type BreathPattern, PatternPicker } from './components/PatternPicker'
 import { SessionExitPill } from './components/SessionExitPill'
+import {
+  Z_CONFIG_BACKDROP,
+  Z_CONFIG_DRAWER,
+  Z_ORB_LAYER,
+  Z_SESSION_CHROME,
+  Z_SESSION_LABEL,
+} from './constants/layers'
 import { layoutTransition } from './constants/motion'
 import { chromeFadeTransition } from './constants/uiMotion'
+import type {
+  BreathCycleDurations,
+  BreathPhase,
+  UseBreathCyclePattern,
+} from './hooks/useBreathCycle'
 import { useBreathSession } from './hooks/useBreathSession'
 import { useTouchRevealUi } from './hooks/useTouchRevealUi'
+import { lightImpact } from './lib/haptics'
+import { clampPrepRounds, DEFAULT_PREP_ROUNDS, sumCycleSeconds } from './lib/prepConstraints'
+import { createSessionAmbient, type SessionAmbientHandle } from './lib/sessionAmbient'
 
-type AppMode = 'selecting' | 'active'
+const CUSTOM_PATTERN_ID = 'custom'
+const DEFAULT_CUSTOM_DURATIONS: BreathCycleDurations = [4, 4, 4, 4]
+const CONFIG_OPEN_SWIPE_THRESHOLD = 56
 
 const PATTERNS: BreathPattern[] = [
   {
@@ -32,29 +50,258 @@ const PATTERNS: BreathPattern[] = [
     subtitle: 'Slow 5-0-5-0',
     durations: [5, 0, 5, 0],
   },
+  {
+    id: CUSTOM_PATTERN_ID,
+    name: 'Custom',
+    subtitle: 'Your intervals & rounds',
+    durations: DEFAULT_CUSTOM_DURATIONS,
+  },
 ]
 
-const SESSION_ROUNDS = 8
-
 function App() {
-  const [appMode, setAppMode] = useState<AppMode>('selecting')
-  const [selectedPatternId, setSelectedPatternId] = useState<string>(PATTERNS[0].id)
+  const [isSessionActive, setSessionActive] = useState(false)
+  const [configDrawerOpen, setConfigDrawerOpen] = useState(false)
+  const [confirmEndOpen, setConfirmEndOpen] = useState(false)
+  const [activePatternId, setActivePatternId] = useState<string>(PATTERNS[0].id)
   const [sessionSheetOpen, setSessionSheetOpen] = useState(false)
+  const [isCustomSession, setIsCustomSession] = useState(false)
+  const [activeCustomDurations, setActiveCustomDurations] =
+    useState<BreathCycleDurations>(DEFAULT_CUSTOM_DURATIONS)
+  const [activeSessionRounds, setActiveSessionRounds] = useState(DEFAULT_PREP_ROUNDS)
+  const [customDraftDurations, setCustomDraftDurations] =
+    useState<BreathCycleDurations>(DEFAULT_CUSTOM_DURATIONS)
+  const [prepRounds, setPrepRounds] = useState(DEFAULT_PREP_ROUNDS)
   const { isUiVisible, revealUi } = useTouchRevealUi(4000)
 
-  const selectedPattern =
-    PATTERNS.find((pattern) => pattern.id === selectedPatternId) ?? PATTERNS[0]
+  const activePattern =
+    PATTERNS.find((pattern) => pattern.id === activePatternId) ?? PATTERNS[0]
 
-  const isSessionActive = appMode === 'active'
-  const breath = useBreathSession(selectedPattern.durations, {
+  const prepIntervals = useMemo((): BreathCycleDurations => {
+    if (activePatternId === CUSTOM_PATTERN_ID) return customDraftDurations
+    return activePattern.durations
+  }, [activePatternId, activePattern.durations, customDraftDurations])
+
+  const prepTotalSessionSec = useMemo(
+    () => sumCycleSeconds(prepIntervals) * prepRounds,
+    [prepIntervals, prepRounds],
+  )
+
+  const idleCyclePattern = useMemo((): UseBreathCyclePattern => {
+    if (activePatternId === CUSTOM_PATTERN_ID) return customDraftDurations
+    return activePattern.durations
+  }, [activePatternId, activePattern.durations, customDraftDurations])
+
+  const cyclePattern = useMemo(
+    () =>
+      isSessionActive && isCustomSession
+        ? { customPattern: { durations: activeCustomDurations } }
+        : isSessionActive
+          ? activePattern.durations
+          : idleCyclePattern,
+    [
+      isSessionActive,
+      isCustomSession,
+      activeCustomDurations,
+      activePattern.durations,
+      idleCyclePattern,
+    ],
+  )
+
+  const breath = useBreathSession(cyclePattern, {
     isActive: isSessionActive,
-    targetRounds: isSessionActive ? SESSION_ROUNDS : undefined,
+    targetRounds: isSessionActive ? activeSessionRounds : undefined,
   })
 
-  const startPattern = (pattern: BreathPattern) => {
-    setSelectedPatternId(pattern.id)
-    setAppMode('active')
+  const sessionNaturallyComplete =
+    isSessionActive &&
+    activeSessionRounds > 0 &&
+    breath.completedRounds >= activeSessionRounds
+
+  const completionChimePlayedRef = useRef(false)
+  const ambientRef = useRef<SessionAmbientHandle | null>(null)
+  const ambientDisposeTimeoutRef = useRef<number | null>(null)
+  const ambientPostCompleteDisposeRef = useRef<number | null>(null)
+  const prevBreathPhaseRef = useRef<BreathPhase | null>(null)
+
+  useEffect(() => {
+    if (!sessionNaturallyComplete) return
+    if (completionChimePlayedRef.current) return
+    completionChimePlayedRef.current = true
+
+    if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
+      navigator.vibrate([14, 55, 16])
+    }
+
+    try {
+      const AC =
+        window.AudioContext ||
+        (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
+      if (!AC) return
+      const ctx = new AC()
+      const osc = ctx.createOscillator()
+      const gain = ctx.createGain()
+      osc.type = 'sine'
+      osc.frequency.setValueAtTime(523.25, ctx.currentTime)
+      gain.gain.setValueAtTime(0, ctx.currentTime)
+      gain.gain.linearRampToValueAtTime(0.032, ctx.currentTime + 0.025)
+      gain.gain.exponentialRampToValueAtTime(0.0008, ctx.currentTime + 0.38)
+      osc.connect(gain)
+      gain.connect(ctx.destination)
+      osc.start(ctx.currentTime)
+      osc.stop(ctx.currentTime + 0.42)
+      void ctx.resume()
+    } catch {
+      /* optional tone — ignore if autoplay blocks */
+    }
+  }, [sessionNaturallyComplete])
+
+  useEffect(() => {
+    if (!sessionNaturallyComplete) return
+    ambientRef.current?.fadeOut(4)
+  }, [sessionNaturallyComplete])
+
+  /** After natural completion, ambient gain reaches ~0 at ~4s — dispose shortly after so we don’t hold an AudioContext until Close. */
+  useEffect(() => {
+    if (!sessionNaturallyComplete) {
+      if (ambientPostCompleteDisposeRef.current !== null) {
+        window.clearTimeout(ambientPostCompleteDisposeRef.current)
+        ambientPostCompleteDisposeRef.current = null
+      }
+      return
+    }
+    const id = window.setTimeout(() => {
+      ambientRef.current?.dispose()
+      ambientRef.current = null
+      ambientPostCompleteDisposeRef.current = null
+    }, 4300)
+    ambientPostCompleteDisposeRef.current = id
+    return () => {
+      window.clearTimeout(id)
+      if (ambientPostCompleteDisposeRef.current === id) {
+        ambientPostCompleteDisposeRef.current = null
+      }
+    }
+  }, [sessionNaturallyComplete])
+
+  useEffect(() => {
+    if (!isSessionActive) {
+      prevBreathPhaseRef.current = null
+      return
+    }
+    if (sessionNaturallyComplete) {
+      prevBreathPhaseRef.current = breath.phase
+      return
+    }
+    const prev = prevBreathPhaseRef.current
+    prevBreathPhaseRef.current = breath.phase
+    if (prev !== null && prev !== breath.phase) {
+      lightImpact()
+    }
+  }, [isSessionActive, sessionNaturallyComplete, breath.phase])
+
+  useEffect(() => {
+    if (!isSessionActive) completionChimePlayedRef.current = false
+  }, [isSessionActive])
+
+  useEffect(() => {
+    return () => {
+      if (ambientDisposeTimeoutRef.current !== null) {
+        window.clearTimeout(ambientDisposeTimeoutRef.current)
+      }
+      if (ambientPostCompleteDisposeRef.current !== null) {
+        window.clearTimeout(ambientPostCompleteDisposeRef.current)
+      }
+      ambientRef.current?.dispose()
+      ambientRef.current = null
+    }
+  }, [])
+
+  const partialRoundProgress = useMemo(() => {
+    if (!isSessionActive || breath.totalCycleTimeMs <= 0) return 0
+    const elapsedBefore = breath.durationMsByPhase
+      .slice(0, breath.phaseIndex)
+      .reduce((sum, ms) => sum + Math.max(0, ms), 0)
+    const elapsedInRound = elapsedBefore + Math.max(0, breath.phaseElapsedMs)
+    return Math.min(1, elapsedInRound / breath.totalCycleTimeMs)
+  }, [
+    isSessionActive,
+    breath.durationMsByPhase,
+    breath.phaseElapsedMs,
+    breath.phaseIndex,
+    breath.totalCycleTimeMs,
+  ])
+
+  const sheetCycleDurations =
+    isSessionActive && isCustomSession ? activeCustomDurations : activePattern.durations
+
+  const sheetTargetRounds = isSessionActive ? activeSessionRounds : undefined
+
+  const cycleSecActive = breath.totalCycleTimeMs / 1000
+  const totalPlanDurationSec = useMemo(() => {
+    if (isSessionActive && sheetTargetRounds) {
+      return cycleSecActive * sheetTargetRounds
+    }
+    return prepTotalSessionSec
+  }, [isSessionActive, sheetTargetRounds, cycleSecActive, prepTotalSessionSec])
+
+  const handleGlobalPan = (_event: MouseEvent | TouchEvent | PointerEvent, info: PanInfo) => {
+    const isVerticalSwipe = Math.abs(info.offset.y) > Math.abs(info.offset.x)
+    const shouldOpenConfig =
+      !isSessionActive &&
+      !configDrawerOpen &&
+      isVerticalSwipe &&
+      info.offset.y >= CONFIG_OPEN_SWIPE_THRESHOLD
+
+    if (shouldOpenConfig) {
+      setConfigDrawerOpen(true)
+    }
+  }
+
+  const handleStartSession = () => {
+    if (ambientDisposeTimeoutRef.current !== null) {
+      window.clearTimeout(ambientDisposeTimeoutRef.current)
+      ambientDisposeTimeoutRef.current = null
+    }
+    if (ambientPostCompleteDisposeRef.current !== null) {
+      window.clearTimeout(ambientPostCompleteDisposeRef.current)
+      ambientPostCompleteDisposeRef.current = null
+    }
+    ambientRef.current?.dispose()
+    ambientRef.current = createSessionAmbient({ peakGain: 0.052, fadeInSec: 3.5 })
+
+    const rounds = clampPrepRounds(prepRounds)
+    setPrepRounds(rounds)
+    setActiveSessionRounds(rounds)
+    if (activePatternId === CUSTOM_PATTERN_ID) {
+      setActiveCustomDurations(customDraftDurations)
+      setIsCustomSession(true)
+    } else {
+      setIsCustomSession(false)
+    }
+    setConfigDrawerOpen(false)
+    setConfirmEndOpen(false)
+    setSessionActive(true)
     setSessionSheetOpen(false)
+  }
+
+  const handleEndSession = () => {
+    ambientRef.current?.fadeOut(1.85)
+    if (ambientDisposeTimeoutRef.current !== null) {
+      window.clearTimeout(ambientDisposeTimeoutRef.current)
+    }
+    ambientDisposeTimeoutRef.current = window.setTimeout(() => {
+      ambientRef.current?.dispose()
+      ambientRef.current = null
+      ambientDisposeTimeoutRef.current = null
+    }, 2000)
+
+    if (isCustomSession) {
+      setCustomDraftDurations(activeCustomDurations)
+    }
+    setIsCustomSession(false)
+    setSessionActive(false)
+    setConfigDrawerOpen(false)
+    setConfirmEndOpen(false)
   }
 
   return (
@@ -66,71 +313,241 @@ function App() {
       <LayoutGroup id="breath-root">
         <motion.div
           layout
-          className="relative z-[5] flex min-h-screen flex-col items-center justify-center"
+          className="relative z-[5] min-h-[100dvh] w-full"
           transition={layoutTransition}
           onPointerDown={revealUi}
+          onPan={handleGlobalPan}
+          style={!isSessionActive && !configDrawerOpen ? { touchAction: 'none' } : undefined}
         >
-          <BreathingOrb
-            isSessionActive={isSessionActive}
-            phase={breath.phase}
-            phaseDurationMs={breath.phaseDurationMs}
-            isUiVisible={isUiVisible}
-          />
+          <motion.div
+            className="pointer-events-none fixed inset-0 flex items-center justify-center"
+            style={{ zIndex: Z_ORB_LAYER }}
+            initial={false}
+            animate={{
+              scale: !isSessionActive ? 1 : sessionNaturallyComplete ? 0.7 : 1,
+              opacity: !isSessionActive ? 1 : sessionNaturallyComplete ? 0 : 1,
+            }}
+            transition={{
+              duration: sessionNaturallyComplete ? 4 : 0.35,
+              ease: 'easeInOut',
+            }}
+          >
+            <div className="pointer-events-none relative isolate inline-grid grid-cols-1 grid-rows-1 place-items-center overflow-visible">
+              {isSessionActive ? (
+                <div
+                  className="pointer-events-none col-start-1 row-start-1 z-0 flex items-center justify-center"
+                  aria-hidden
+                >
+                  <OrbSessionRing
+                    completedRounds={breath.completedRounds}
+                    partialRoundProgress={partialRoundProgress}
+                    targetRounds={activeSessionRounds}
+                    isSessionActive={isSessionActive}
+                  />
+                </div>
+              ) : null}
+              <div className="pointer-events-none relative col-start-1 row-start-1 z-[1] flex items-center justify-center">
+                <BreathingOrb
+                  isSessionActive={isSessionActive}
+                  freezeForSessionComplete={sessionNaturallyComplete}
+                  phase={breath.phase}
+                  phaseDurationMs={breath.phaseDurationMs}
+                  phaseElapsedMs={breath.phaseElapsedMs}
+                />
+              </div>
+            </div>
+          </motion.div>
 
-          <AnimatePresence mode="popLayout">
-            {appMode === 'selecting' ? (
-              <PatternPicker
-                key="pattern-browser"
-                patterns={PATTERNS}
-                selectedPatternId={selectedPatternId}
-                onHoverPattern={setSelectedPatternId}
-                onSelectPattern={startPattern}
-              />
-            ) : null}
-          </AnimatePresence>
+          {!isSessionActive && !configDrawerOpen ? (
+            <div
+              className="pointer-events-none fixed left-0 right-0 top-0 flex justify-center px-4 pt-[max(0.85rem,env(safe-area-inset-top))]"
+              style={{ zIndex: Z_SESSION_CHROME }}
+              aria-hidden
+            >
+              <p className="text-[11px] uppercase tracking-[0.2em] text-cyan-100/30">
+                Swipe down to configure
+              </p>
+            </div>
+          ) : null}
 
-          <AnimatePresence mode="popLayout">
-            {appMode === 'active' ? (
+          {isSessionActive && !sessionNaturallyComplete ? (
+            <>
+              <button
+                type="button"
+                aria-label="End session"
+                onClick={() => setConfirmEndOpen(true)}
+                className="fixed right-4 top-[max(0.85rem,env(safe-area-inset-top))] rounded-lg px-2.5 py-1.5 text-lg font-medium leading-none text-cyan-50/45 transition-colors hover:bg-white/[0.06] hover:text-cyan-50/75 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40"
+                style={{ zIndex: Z_SESSION_CHROME + 1 }}
+              >
+                ×
+              </button>
+
               <motion.div
-                key="swipe-down-zone"
-                layout
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.4, ease: 'easeOut', delay: 0.12 }}
+                className="pointer-events-none fixed left-0 right-0 flex flex-col items-center px-6 text-center"
+                style={{
+                  zIndex: Z_SESSION_LABEL,
+                  bottom: 'max(6rem, calc(env(safe-area-inset-bottom) + 5rem))',
+                }}
+              >
+                <AnimatePresence mode="wait" initial={false}>
+                  <motion.p
+                    key={breath.phase}
+                    initial={{ opacity: 0, y: 6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -6 }}
+                    transition={{ duration: 0.28, ease: 'easeOut' }}
+                    className="text-4xl font-semibold tracking-wide text-white sm:text-5xl"
+                    style={{
+                      textShadow:
+                        '0 0 10px rgba(255,255,255,0.22), 0 0 28px rgba(255,255,255,0.08), 0 1px 2px rgba(0,0,0,0.35)',
+                    }}
+                  >
+                    {breath.phase}
+                  </motion.p>
+                </AnimatePresence>
+              </motion.div>
+              <AnimatePresence mode="popLayout">
+                <motion.div
+                  key="swipe-down-zone"
+                  layout
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  transition={{
+                    ...layoutTransition,
+                    opacity: { duration: 0.28 },
+                  }}
+                  className="pointer-events-none fixed inset-x-0 top-0 flex h-24 items-start justify-center"
+                  style={{ zIndex: Z_SESSION_CHROME }}
+                >
+                  <motion.div
+                    initial={false}
+                    animate={{ opacity: isUiVisible ? 1 : 0 }}
+                    transition={chromeFadeTransition}
+                    className={isUiVisible ? 'pointer-events-auto' : 'pointer-events-none'}
+                  >
+                    <SessionExitPill onExit={handleEndSession} />
+                  </motion.div>
+                </motion.div>
+              </AnimatePresence>
+            </>
+          ) : null}
+
+          <AnimatePresence>
+            {isSessionActive && sessionNaturallyComplete ? (
+              <motion.div
+                key="session-complete"
+                role="status"
+                aria-live="polite"
+                className="fixed inset-0 flex flex-col items-center justify-center gap-8 px-6"
+                style={{ zIndex: Z_CONFIG_DRAWER }}
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
-                transition={{
-                  ...layoutTransition,
-                  opacity: { duration: 0.28 },
-                }}
-                className="absolute inset-x-0 top-0 flex h-24 items-start justify-center"
+                transition={{ delay: 3.15, duration: 0.95, ease: 'easeOut' }}
               >
-                <motion.div
-                  initial={false}
-                  animate={{ opacity: isUiVisible ? 1 : 0 }}
-                  transition={chromeFadeTransition}
-                  className={isUiVisible ? '' : 'pointer-events-none'}
+                <p className="text-center text-3xl font-semibold tracking-wide text-cyan-50 sm:text-4xl">
+                  Session complete
+                </p>
+                <button
+                  type="button"
+                  onClick={handleEndSession}
+                  className="touch-manipulation rounded-xl border border-white/[0.14] bg-white/[0.06] px-8 py-3 text-sm font-medium tracking-wide text-cyan-100/90 transition-colors hover:bg-white/[0.1] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/45"
                 >
-                  <SessionExitPill onExit={() => setAppMode('selecting')} />
-                </motion.div>
+                  Close
+                </button>
               </motion.div>
             ) : null}
           </AnimatePresence>
+
+          <AnimatePresence>
+            {isSessionActive && confirmEndOpen ? (
+              <>
+                <motion.button
+                  type="button"
+                  aria-label="Dismiss end session dialog"
+                  className="fixed inset-0 bg-black/60"
+                  style={{ zIndex: Z_CONFIG_BACKDROP }}
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  onClick={() => setConfirmEndOpen(false)}
+                />
+                <motion.div
+                  role="dialog"
+                  aria-modal="true"
+                  aria-label="End session confirmation"
+                  className="fixed left-1/2 top-1/2 w-[min(92vw,22rem)] -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-white/[0.12] bg-[#0a0d14]/95 p-4 shadow-[0_16px_48px_rgba(0,0,0,0.55)] backdrop-blur-xl"
+                  style={{ zIndex: Z_CONFIG_DRAWER }}
+                  initial={{ opacity: 0, scale: 0.96, y: 8 }}
+                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.98, y: 4 }}
+                  transition={{ duration: 0.2, ease: 'easeOut' }}
+                >
+                  <p className="text-base font-semibold tracking-wide text-cyan-50">End session?</p>
+                  <p className="mt-1 text-sm text-cyan-100/65">
+                    Your current breathing session will stop immediately.
+                  </p>
+                  <div className="mt-4 flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setConfirmEndOpen(false)}
+                      className="flex-1 rounded-xl border border-white/[0.12] px-3 py-2 text-sm font-medium text-cyan-100/85 transition-colors hover:bg-white/[0.06]"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleEndSession}
+                      className="flex-1 rounded-xl bg-cyan-500/28 px-3 py-2 text-sm font-semibold text-cyan-50 transition-colors hover:bg-cyan-500/38"
+                    >
+                      End session
+                    </button>
+                  </div>
+                </motion.div>
+              </>
+            ) : null}
+          </AnimatePresence>
+
+          {configDrawerOpen ? (
+            <ConfigDrawer
+              open={configDrawerOpen}
+              onClose={() => setConfigDrawerOpen(false)}
+              patterns={PATTERNS}
+              activePatternId={activePatternId}
+              customPatternId={CUSTOM_PATTERN_ID}
+              onActivePatternIdChange={setActivePatternId}
+              prepRounds={prepRounds}
+              onPrepRoundsChange={(n) => setPrepRounds(clampPrepRounds(n))}
+              customDraftDurations={customDraftDurations}
+              onCustomDraftChange={setCustomDraftDurations}
+              totalSessionDurationSec={prepTotalSessionSec}
+              onStartSession={handleStartSession}
+            />
+          ) : null}
         </motion.div>
       </LayoutGroup>
 
       <FilmGrainOverlay />
 
-      <BottomSheet
-        open={sessionSheetOpen}
-        onOpenChange={setSessionSheetOpen}
-        patternName={selectedPattern.name}
-        cycleDurations={selectedPattern.durations}
-        totalCycleTimeSec={breath.totalCycleTimeMs / 1000}
-        sessionProgress={breath.sessionProgress}
-        currentRound={breath.currentRound}
-        targetRounds={isSessionActive ? SESSION_ROUNDS : undefined}
-        isSessionActive={isSessionActive}
-        isUiVisible={isUiVisible}
-      />
+      {!configDrawerOpen ? (
+        <BottomSheet
+          open={sessionSheetOpen}
+          onOpenChange={setSessionSheetOpen}
+          patternName={activePattern.name}
+          cycleDurations={sheetCycleDurations}
+          totalCycleTimeSec={breath.totalCycleTimeMs / 1000}
+          totalPlanDurationSec={totalPlanDurationSec}
+          sessionProgress={breath.sessionProgress}
+          currentRound={breath.currentRound}
+          targetRounds={sheetTargetRounds}
+          isSessionActive={isSessionActive}
+          isUiVisible={isUiVisible}
+        />
+      ) : null}
     </div>
   )
 }

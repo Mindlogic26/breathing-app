@@ -1,22 +1,85 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useReducer, useRef, useState } from 'react'
 
 export const PHASE_ORDER = ['Inhale', 'Hold In', 'Exhale', 'Hold Out'] as const
 
 export type BreathPhase = (typeof PHASE_ORDER)[number]
 export type BreathCycleDurations = [number, number, number, number]
 
+/** Explicit custom configuration (presets may pass a plain duration tuple instead). */
+export type CustomBreathPattern = {
+  durations: BreathCycleDurations
+}
+
+export type UseBreathCyclePattern = BreathCycleDurations | { customPattern: CustomBreathPattern }
+
 const toMilliseconds = (seconds: number) => Math.max(0, seconds) * 1000
 
-export const useBreathCycle = (durations: BreathCycleDurations, enabled: boolean) => {
-  const [phaseIndex, setPhaseIndex] = useState(0)
-  const [phaseStartedAt, setPhaseStartedAt] = useState(() => window.performance.now())
+const resolveDurations = (pattern: UseBreathCyclePattern): BreathCycleDurations =>
+  Array.isArray(pattern) ? pattern : pattern.customPattern.durations
+
+type CycleState = {
+  phaseIndex: number
+  completedRounds: number
+  phaseStartedAt: number
+}
+
+type CycleAction =
+  | { type: 'reset'; t: number }
+  | { type: 'advancePhase'; t: number; phaseCount: number }
+
+const cycleReducer = (state: CycleState, action: CycleAction): CycleState => {
+  switch (action.type) {
+    case 'reset':
+      return {
+        phaseIndex: 0,
+        completedRounds: 0,
+        phaseStartedAt: action.t,
+      }
+    case 'advancePhase': {
+      const nextPhaseIndex = (state.phaseIndex + 1) % action.phaseCount
+      return {
+        phaseIndex: nextPhaseIndex,
+        phaseStartedAt: action.t,
+        completedRounds: nextPhaseIndex === 0 ? state.completedRounds + 1 : state.completedRounds,
+      }
+    }
+    default:
+      return state
+  }
+}
+
+export type UseBreathCycleOptions = {
+  /** Master switch: false resets cycle (session ended). */
+  active: boolean
+  /**
+   * When set with an active session, phase advancement stops once completedRounds reaches this count
+   * (natural completion) without resetting state — UI can fade out while frozen on last tick.
+   */
+  targetRounds?: number
+}
+
+export const useBreathCycle = (pattern: UseBreathCyclePattern, options: UseBreathCycleOptions) => {
+  const { active, targetRounds } = options
+  const [cycle, dispatch] = useReducer(cycleReducer, undefined, () => ({
+    phaseIndex: 0,
+    completedRounds: 0,
+    phaseStartedAt: window.performance.now(),
+  }))
   const [now, setNow] = useState(() => window.performance.now())
-  const [completedRounds, setCompletedRounds] = useState(0)
-  const prevEnabledRef = useRef(enabled)
+  const prevActiveRef = useRef(active)
+
+  const { phaseIndex, completedRounds, phaseStartedAt } = cycle
+
+  const hasRoundCap =
+    targetRounds !== undefined && targetRounds !== null && Number.isFinite(targetRounds) && targetRounds >= 1
+  const mayAdvancePhases = active && (!hasRoundCap || completedRounds < Math.max(1, Math.round(targetRounds!)))
+
+  const durationKey = (Array.isArray(pattern) ? pattern : pattern.customPattern.durations).join(',')
+  const durations = useMemo(() => resolveDurations(pattern), [durationKey])
 
   const durationMsByPhase = useMemo(
     () => durations.map((seconds) => toMilliseconds(seconds)),
-    [durations],
+    [durationKey],
   )
 
   const phase = PHASE_ORDER[phaseIndex]
@@ -25,39 +88,38 @@ export const useBreathCycle = (durations: BreathCycleDurations, enabled: boolean
   const phaseElapsedMs = Math.min(Math.max(0, now - phaseStartedAt), phaseDurationMs)
 
   useEffect(() => {
-    const wasEnabled = prevEnabledRef.current
-    prevEnabledRef.current = enabled
+    const wasActive = prevActiveRef.current
+    prevActiveRef.current = active
 
-    if (enabled === wasEnabled) return
+    if (active === wasActive) return
 
+    // Reset on any active transition. Ending a session clears state; starting again must
+    // re-sync phaseStartedAt with `now` — otherwise idle time makes phaseElapsedMs jump to
+    // the end of the first phase and the progress ring looks partially filled.
     const t = window.performance.now()
-    setPhaseIndex(0)
-    setCompletedRounds(0)
-    setPhaseStartedAt(t)
+    dispatch({ type: 'reset', t })
     setNow(t)
-  }, [enabled])
+  }, [active])
 
   useEffect(() => {
-    if (!enabled) return
+    if (!active || !mayAdvancePhases) return
 
     const timeoutId = window.setTimeout(() => {
-      setPhaseStartedAt(window.performance.now())
-      setPhaseIndex((prevIndex) => {
-        const nextPhaseIndex = (prevIndex + 1) % PHASE_ORDER.length
-        if (nextPhaseIndex === 0) {
-          setCompletedRounds((previousRounds) => previousRounds + 1)
-        }
-        return nextPhaseIndex
+      const t = window.performance.now()
+      dispatch({
+        type: 'advancePhase',
+        t,
+        phaseCount: PHASE_ORDER.length,
       })
     }, phaseDurationMs)
 
     return () => {
       window.clearTimeout(timeoutId)
     }
-  }, [enabled, phaseDurationMs, phaseIndex])
+  }, [active, mayAdvancePhases, phaseDurationMs, phaseIndex])
 
   useEffect(() => {
-    if (!enabled) return
+    if (!active) return
 
     let animationFrameId: number
     const tick = (timestamp: number) => {
@@ -69,14 +131,14 @@ export const useBreathCycle = (durations: BreathCycleDurations, enabled: boolean
     return () => {
       window.cancelAnimationFrame(animationFrameId)
     }
-  }, [enabled])
+  }, [active])
 
   return {
     phase,
     phaseIndex,
     phaseDurationMs,
     phaseElapsedMs,
-    phaseDurationSeconds: durations[phaseIndex],
+    phaseDurationSeconds: durations[phaseIndex] ?? 0,
     totalCycleTimeMs,
     durationMsByPhase,
     completedRounds,

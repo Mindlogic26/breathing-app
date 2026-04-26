@@ -11,6 +11,8 @@ export type BottomSheetProps = {
   patternName: string
   cycleDurations: BreathCycleDurations
   totalCycleTimeSec: number
+  /** Full session length: one cycle × rounds (seconds). */
+  totalPlanDurationSec: number
   sessionProgress: number
   currentRound: number
   targetRounds?: number
@@ -31,6 +33,7 @@ export const BottomSheet = ({
   patternName,
   cycleDurations,
   totalCycleTimeSec,
+  totalPlanDurationSec,
   sessionProgress,
   currentRound,
   targetRounds,
@@ -58,7 +61,7 @@ export const BottomSheet = ({
       style={{ height: PANEL_HEIGHT, zIndex: Z_BOTTOM_SHEET }}
     >
       <div
-        className="pointer-events-auto isolate flex h-full touch-pan-y flex-col overflow-hidden rounded-t-2xl border border-white/[0.08] bg-[#0c0c0c]/90 shadow-[0_-12px_48px_rgba(0,0,0,0.45)] backdrop-blur-xl"
+        className="pointer-events-auto isolate flex h-full flex-col overflow-hidden rounded-t-2xl border border-white/[0.08] bg-[#0c0c0c]/90 shadow-[0_-12px_48px_rgba(0,0,0,0.45)] backdrop-blur-xl"
         onPointerDown={isolateSheetPointers}
         onPointerUp={isolateSheetPointers}
         onPointerCancel={isolateSheetPointers}
@@ -66,7 +69,7 @@ export const BottomSheet = ({
         <div
           role="button"
           tabIndex={0}
-          className="flex cursor-pointer shrink-0 flex-col items-center gap-1.5 py-2.5 outline-none select-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-cyan-400/40"
+          className="flex touch-none cursor-pointer shrink-0 flex-col items-center gap-1.5 py-2.5 outline-none select-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-cyan-400/40"
           aria-expanded={open}
           aria-label={open ? 'Close session info' : 'Open session info'}
           onKeyDown={(event) => {
@@ -81,7 +84,7 @@ export const BottomSheet = ({
         >
           <motion.div
             initial={false}
-            animate={{ opacity: isUiVisible ? 1 : 0 }}
+            animate={{ opacity: open || isUiVisible ? 1 : 0 }}
             transition={chromeFadeTransition}
             className="flex flex-col items-center gap-1.5"
           >
@@ -111,6 +114,12 @@ export const BottomSheet = ({
             <div className="rounded-xl bg-white/[0.04] px-3 py-2.5">
               <dt className="text-[10px] uppercase tracking-wider text-cyan-100/45">Cycle length</dt>
               <dd className="mt-1 tabular-nums text-cyan-100/90">{totalCycleTimeSec.toFixed(1)}s</dd>
+            </div>
+            <div className="rounded-xl bg-white/[0.04] px-3 py-2.5">
+              <dt className="text-[10px] uppercase tracking-wider text-cyan-100/45">Session total</dt>
+              <dd className="mt-1 tabular-nums text-cyan-100/90">
+                {totalPlanDurationSec > 0 ? `${Math.round(totalPlanDurationSec)}s` : '—'}
+              </dd>
             </div>
             <div className="rounded-xl bg-white/[0.04] px-3 py-2.5">
               <dt className="text-[10px] uppercase tracking-wider text-cyan-100/45">Session</dt>

@@ -1,4 +1,4 @@
-import type { BreathCycleDurations } from './useBreathCycle'
+import type { UseBreathCyclePattern } from './useBreathCycle'
 import { useBreathCycle } from './useBreathCycle'
 import { useSessionProgress } from './useSessionProgress'
 
@@ -8,10 +8,13 @@ type UseBreathSessionOptions = {
 }
 
 export const useBreathSession = (
-  durations: BreathCycleDurations,
+  pattern: UseBreathCyclePattern,
   { isActive, targetRounds }: UseBreathSessionOptions,
 ) => {
-  const cycle = useBreathCycle(durations, isActive)
+  const cycle = useBreathCycle(pattern, {
+    active: isActive,
+    targetRounds: isActive ? targetRounds : undefined,
+  })
   const { progress: sessionProgress, currentRound } = useSessionProgress({
     isActive,
     targetRounds,

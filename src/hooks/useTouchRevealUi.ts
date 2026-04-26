@@ -4,6 +4,9 @@ const DEFAULT_IDLE_MS = 4000
 
 /**
  * Chrome fades after idle; any pointer down (capture) or calling revealUi() shows it again.
+ *
+ * Session affordances (exit pill, collapsed sheet handle hint) use this so they hide during
+ * the exercise and return on tap. Keep the orb, phase label, and open sheet content on this.
  */
 export const useTouchRevealUi = (idleMs = DEFAULT_IDLE_MS) => {
   const [isUiVisible, setIsUiVisible] = useState(true)
