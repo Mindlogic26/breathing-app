@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useReducer, useRef, useState } from 'react'
 
+import { triggerHapticFeedback } from '../lib/haptics'
+
 export const PHASE_ORDER = ['Inhale', 'Hold In', 'Exhale', 'Hold Out'] as const
 
 export type BreathPhase = (typeof PHASE_ORDER)[number]
@@ -106,6 +108,8 @@ export const useBreathCycle = (pattern: UseBreathCyclePattern, options: UseBreat
 
     const timeoutId = window.setTimeout(() => {
       const t = window.performance.now()
+      // Same macrotask as dispatch (not after React re-render). Still not a user gesture — see haptics.ts for iOS.
+      triggerHapticFeedback(10)
       dispatch({
         type: 'advancePhase',
         t,

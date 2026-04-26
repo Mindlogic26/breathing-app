@@ -16,14 +16,10 @@ import {
 } from './constants/layers'
 import { layoutTransition } from './constants/motion'
 import { chromeFadeTransition } from './constants/uiMotion'
-import type {
-  BreathCycleDurations,
-  BreathPhase,
-  UseBreathCyclePattern,
-} from './hooks/useBreathCycle'
+import type { BreathCycleDurations, UseBreathCyclePattern } from './hooks/useBreathCycle'
 import { useBreathSession } from './hooks/useBreathSession'
 import { useTouchRevealUi } from './hooks/useTouchRevealUi'
-import { lightImpact } from './lib/haptics'
+import { triggerHapticFeedback } from './lib/haptics'
 import { clampPrepRounds, DEFAULT_PREP_ROUNDS, sumCycleSeconds } from './lib/prepConstraints'
 import { createSessionAmbient, type SessionAmbientHandle } from './lib/sessionAmbient'
 
@@ -121,16 +117,13 @@ function App() {
   const ambientRef = useRef<SessionAmbientHandle | null>(null)
   const ambientDisposeTimeoutRef = useRef<number | null>(null)
   const ambientPostCompleteDisposeRef = useRef<number | null>(null)
-  const prevBreathPhaseRef = useRef<BreathPhase | null>(null)
 
   useEffect(() => {
     if (!sessionNaturallyComplete) return
     if (completionChimePlayedRef.current) return
     completionChimePlayedRef.current = true
 
-    if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
-      navigator.vibrate([14, 55, 16])
-    }
+    triggerHapticFeedback([14, 55, 16])
 
     try {
       const AC =
@@ -182,22 +175,6 @@ function App() {
       }
     }
   }, [sessionNaturallyComplete])
-
-  useEffect(() => {
-    if (!isSessionActive) {
-      prevBreathPhaseRef.current = null
-      return
-    }
-    if (sessionNaturallyComplete) {
-      prevBreathPhaseRef.current = breath.phase
-      return
-    }
-    const prev = prevBreathPhaseRef.current
-    prevBreathPhaseRef.current = breath.phase
-    if (prev !== null && prev !== breath.phase) {
-      lightImpact()
-    }
-  }, [isSessionActive, sessionNaturallyComplete, breath.phase])
 
   useEffect(() => {
     if (!isSessionActive) completionChimePlayedRef.current = false
