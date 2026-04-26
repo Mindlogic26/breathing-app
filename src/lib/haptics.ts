@@ -9,3 +9,9 @@ export function triggerExitHaptic(): void {
   if (typeof navigator === 'undefined' || typeof navigator.vibrate !== 'function') return
   navigator.vibrate([12, 45, 18])
 }
+
+/** Committing to a new session from config (primary CTA). */
+export function startSessionHaptic(): void {
+  if (typeof navigator === 'undefined' || typeof navigator.vibrate !== 'function') return
+  navigator.vibrate(50)
+}
