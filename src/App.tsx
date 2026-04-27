@@ -19,7 +19,6 @@ import { chromeFadeTransition } from './constants/uiMotion'
 import type { BreathCycleDurations, UseBreathCyclePattern } from './hooks/useBreathCycle'
 import { useBreathSession } from './hooks/useBreathSession'
 import { useTouchRevealUi } from './hooks/useTouchRevealUi'
-import { triggerHapticFeedback } from './lib/haptics'
 import { clampPrepRounds, DEFAULT_PREP_ROUNDS, sumCycleSeconds } from './lib/prepConstraints'
 import { createSessionAmbient, type SessionAmbientHandle } from './lib/sessionAmbient'
 
@@ -122,8 +121,6 @@ function App() {
     if (!sessionNaturallyComplete) return
     if (completionChimePlayedRef.current) return
     completionChimePlayedRef.current = true
-
-    triggerHapticFeedback([14, 55, 16])
 
     try {
       const AC =

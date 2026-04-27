@@ -2,7 +2,6 @@ import { motion } from 'framer-motion'
 
 import { TOP_EXIT_DRAG_THRESHOLD_PX } from '../constants/gestures'
 import { layoutTransition } from '../constants/motion'
-import { triggerHapticFeedback } from '../lib/haptics'
 
 type SessionExitPillProps = {
   onExit: () => void
@@ -19,7 +18,6 @@ export const SessionExitPill = ({ onExit }: SessionExitPillProps) => (
     dragElastic={0.12}
     onDragEnd={(_, info) => {
       if (info.offset.y > TOP_EXIT_DRAG_THRESHOLD_PX) {
-        triggerHapticFeedback([12, 45, 18])
         onExit()
       }
     }}

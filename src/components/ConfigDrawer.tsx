@@ -4,7 +4,6 @@ import { Z_CONFIG_BACKDROP, Z_CONFIG_DRAWER } from '../constants/layers'
 import { layoutEase } from '../constants/motion'
 import type { BreathCycleDurations } from '../hooks/useBreathCycle'
 import { usePointerSwipeVertical } from '../hooks/usePointerSwipeVertical'
-import { triggerHapticFeedback } from '../lib/haptics'
 import { clampPrepSec } from '../lib/prepConstraints'
 import { PrepRoundsSlider } from './PrepRoundsSlider'
 
@@ -249,10 +248,7 @@ export const ConfigDrawer = ({
                 </div>
                 <button
                   type="button"
-                  onClick={() => {
-                    triggerHapticFeedback(50)
-                    onStartSession()
-                  }}
+                  onClick={onStartSession}
                   className="mt-2 w-full rounded-2xl bg-cyan-500/28 py-[1.15rem] text-base font-semibold tracking-wide text-cyan-50 shadow-[0_8px_28px_rgba(34,211,238,0.12)] transition-colors hover:bg-cyan-500/38 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/45 active:bg-cyan-500/32 touch-manipulation"
                 >
                   Start session
