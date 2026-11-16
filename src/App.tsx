@@ -20,7 +20,12 @@ import type { BreathCycleDurations, UseBreathCyclePattern } from './hooks/useBre
 import { useBreathSession } from './hooks/useBreathSession'
 import { useTouchRevealUi } from './hooks/useTouchRevealUi'
 import { clampPrepRounds, DEFAULT_PREP_ROUNDS, sumCycleSeconds } from './lib/prepConstraints'
-import { createSessionAmbient, type SessionAmbientHandle } from './lib/sessionAmbient'
+import {
+  createSessionAmbient,
+  playCompletionBell,
+  type SessionAmbientHandle,
+  unlockAudio,
+} from './lib/sessionAmbient'
 
 const CUSTOM_PATTERN_ID = 'custom'
 const DEFAULT_CUSTOM_DURATIONS: BreathCycleDurations = [4, 4, 4, 4]
@@ -122,27 +127,8 @@ function App() {
     if (completionChimePlayedRef.current) return
     completionChimePlayedRef.current = true
 
-    try {
-      const AC =
-        window.AudioContext ||
-        (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
-      if (!AC) return
-      const ctx = new AC()
-      const osc = ctx.createOscillator()
-      const gain = ctx.createGain()
-      osc.type = 'sine'
-      osc.frequency.setValueAtTime(523.25, ctx.currentTime)
-      gain.gain.setValueAtTime(0, ctx.currentTime)
-      gain.gain.linearRampToValueAtTime(0.032, ctx.currentTime + 0.025)
-      gain.gain.exponentialRampToValueAtTime(0.0008, ctx.currentTime + 0.38)
-      osc.connect(gain)
-      gain.connect(ctx.destination)
-      osc.start(ctx.currentTime)
-      osc.stop(ctx.currentTime + 0.42)
-      void ctx.resume()
-    } catch {
-      /* optional tone — ignore if autoplay blocks */
-    }
+    // Reuses the context unlocked by the Start tap (shared with the ambience).
+    playCompletionBell()
   }, [sessionNaturallyComplete])
 
   useEffect(() => {
@@ -232,6 +218,9 @@ function App() {
   }
 
   const handleStartSession = () => {
+    // Must run synchronously inside the tap (iOS): audio session + silent buffer + resume.
+    unlockAudio()
+
     if (ambientDisposeTimeoutRef.current !== null) {
       window.clearTimeout(ambientDisposeTimeoutRef.current)
       ambientDisposeTimeoutRef.current = null
