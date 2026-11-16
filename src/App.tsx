@@ -63,7 +63,20 @@ const PATTERNS: BreathPattern[] = [
   },
 ]
 
+declare global {
+  interface Window {
+    /** TEMPORARY: App render (commit) count, read from outside to check the session doesn't re-render per frame. */
+    __breathRenders?: number
+  }
+}
+
 function App() {
+  // TEMPORARY render counter, shipped in the normal build on purpose so it can be measured on the
+  // deployed app. Counts commits (in production every render commits). Remove once verified.
+  useEffect(() => {
+    window.__breathRenders = (window.__breathRenders ?? 0) + 1
+  })
+
   const [isSessionActive, setSessionActive] = useState(false)
   const [configDrawerOpen, setConfigDrawerOpen] = useState(false)
   const [confirmEndOpen, setConfirmEndOpen] = useState(false)
@@ -203,21 +216,6 @@ function App() {
     }
   }, [])
 
-  const partialRoundProgress = useMemo(() => {
-    if (!isSessionActive || breath.totalCycleTimeMs <= 0) return 0
-    const elapsedBefore = breath.durationMsByPhase
-      .slice(0, breath.phaseIndex)
-      .reduce((sum, ms) => sum + Math.max(0, ms), 0)
-    const elapsedInRound = elapsedBefore + Math.max(0, breath.phaseElapsedMs)
-    return Math.min(1, elapsedInRound / breath.totalCycleTimeMs)
-  }, [
-    isSessionActive,
-    breath.durationMsByPhase,
-    breath.phaseElapsedMs,
-    breath.phaseIndex,
-    breath.totalCycleTimeMs,
-  ])
-
   const sheetCycleDurations =
     isSessionActive && isCustomSession ? activeCustomDurations : activePattern.durations
 
@@ -331,7 +329,7 @@ function App() {
                 >
                   <OrbSessionRing
                     completedRounds={breath.completedRounds}
-                    partialRoundProgress={partialRoundProgress}
+                    roundProgressMv={breath.roundProgressMv}
                     targetRounds={activeSessionRounds}
                     isSessionActive={isSessionActive}
                   />
@@ -343,7 +341,7 @@ function App() {
                   freezeForSessionComplete={sessionNaturallyComplete}
                   phase={breath.phase}
                   phaseDurationMs={breath.phaseDurationMs}
-                  phaseElapsedMs={breath.phaseElapsedMs}
+                  phaseElapsedMv={breath.phaseElapsedMv}
                 />
               </div>
             </div>
@@ -534,7 +532,7 @@ function App() {
           cycleDurations={sheetCycleDurations}
           totalCycleTimeSec={breath.totalCycleTimeMs / 1000}
           totalPlanDurationSec={totalPlanDurationSec}
-          sessionProgress={breath.sessionProgress}
+          sessionProgressMv={breath.sessionProgressMv}
           currentRound={breath.currentRound}
           targetRounds={sheetTargetRounds}
           isSessionActive={isSessionActive}

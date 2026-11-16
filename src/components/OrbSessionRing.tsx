@@ -1,4 +1,4 @@
-import { motion } from 'framer-motion'
+import { type MotionValue, motion, useTransform } from 'framer-motion'
 import { useMemo } from 'react'
 
 import { ORB_RING_DIAMETER_FACTOR, ORB_SESSION_MAX_SCALE } from '../hooks/useOrbAnimation'
@@ -21,7 +21,8 @@ const STROKE_USER = 0.4
 
 type OrbSessionRingProps = {
   completedRounds: number
-  partialRoundProgress: number
+  /** 0..1 within the current round (MotionValue — fills smoothly without re-rendering). */
+  roundProgressMv: MotionValue<number>
   /** Up to MAX_SEGMENTED_ROUNDS: one arc per round. Above: one continuous arc. */
   targetRounds: number
   isSessionActive: boolean
@@ -52,11 +53,12 @@ const buildCompletedDashArray = (
  * - Up to MAX_SEGMENTED_ROUNDS: one arc per round; fills smoothly within each round.
  * - Above: one continuous arc filling over the whole session, still advancing smoothly within
  *   the current round (the only motion during long holds, e.g. 4-7-8's 7s hold).
- * Dash updates are not tweened (duration 0) so round boundaries don't interpolate into a multi-segment sweep.
+ * The smooth fill is a MotionValue applied via style (no React render per frame); round boundaries
+ * change discrete props only, so they never interpolate into a multi-segment sweep.
  */
 export const OrbSessionRing = ({
   completedRounds,
-  partialRoundProgress,
+  roundProgressMv,
   targetRounds,
   isSessionActive,
 }: OrbSessionRingProps) => {
@@ -79,7 +81,6 @@ export const OrbSessionRing = ({
   }, [segmentCount])
 
   const completedCap = Math.min(Math.max(0, completedRounds), segmentCount)
-  const safePartial = Math.min(1, Math.max(0, partialRoundProgress))
 
   const completedDasharray = useMemo(
     () => buildCompletedDashArray(completedCap, segLen, gapLen, segmentCount),
@@ -87,13 +88,22 @@ export const OrbSessionRing = ({
   )
 
   const segmentStride = segLen + gapLen
-  const currentStrokeDasharray = `${segLen * safePartial} ${circ}`
   const currentStrokeDashoffset = -completedCap * segmentStride
+  const isContinuous = segmentCount > MAX_SEGMENTED_ROUNDS
+
+  const clampPartial = (p: number) => Math.min(1, Math.max(0, p))
+  /** Segmented: current round's arc grows within its segment. */
+  const currentStrokeDasharray = useTransform(
+    roundProgressMv,
+    (p) => `${segLen * clampPartial(p)} ${circ}`,
+  )
+  /** Continuous: one arc for the whole session (completed rounds + current round progress). */
+  const sessionStrokeDasharray = useTransform(
+    roundProgressMv,
+    (p) => `${circ * Math.min(1, (completedCap + clampPartial(p)) / segmentCount)} ${circ}`,
+  )
 
   if (!isSessionActive) return null
-
-  const isContinuous = segmentCount > MAX_SEGMENTED_ROUNDS
-  const sessionProgress = Math.min(1, (completedCap + safePartial) / segmentCount)
 
   return (
     <svg
@@ -126,9 +136,7 @@ export const OrbSessionRing = ({
             stroke="rgba(165, 243, 252, 1)"
             strokeWidth={STROKE_USER}
             strokeLinecap="round"
-            style={{ opacity: 0.92 }}
-            animate={{ strokeDasharray: `${circ * sessionProgress} ${circ}` }}
-            transition={{ duration: 0 }}
+            style={{ opacity: 0.92, strokeDasharray: sessionStrokeDasharray }}
           />
         </g>
       ) : (
@@ -166,12 +174,11 @@ export const OrbSessionRing = ({
               stroke="rgba(165, 243, 252, 1)"
               strokeWidth={STROKE_USER}
               strokeLinecap="round"
-              style={{ opacity: 0.92 }}
-              animate={{
+              style={{
+                opacity: 0.92,
                 strokeDasharray: currentStrokeDasharray,
                 strokeDashoffset: currentStrokeDashoffset,
               }}
-              transition={{ duration: 0 }}
             />
           ) : null}
         </g>

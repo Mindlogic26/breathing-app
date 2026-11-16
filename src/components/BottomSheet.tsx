@@ -1,4 +1,4 @@
-import { motion } from 'framer-motion'
+import { type MotionValue, motion, useTransform } from 'framer-motion'
 
 import { Z_BOTTOM_SHEET } from '../constants/layers'
 import { chromeFadeTransition } from '../constants/uiMotion'
@@ -13,7 +13,8 @@ export type BottomSheetProps = {
   totalCycleTimeSec: number
   /** Full session length: one cycle × rounds (seconds). */
   totalPlanDurationSec: number
-  sessionProgress: number
+  /** 0..1 across the session (MotionValue — the % text updates without re-rendering). */
+  sessionProgressMv: MotionValue<number>
   currentRound: number
   targetRounds?: number
   isSessionActive: boolean
@@ -34,13 +35,14 @@ export const BottomSheet = ({
   cycleDurations,
   totalCycleTimeSec,
   totalPlanDurationSec,
-  sessionProgress,
+  sessionProgressMv,
   currentRound,
   targetRounds,
   isSessionActive,
   isUiVisible,
 }: BottomSheetProps) => {
   const hiddenOffset = PANEL_HEIGHT - PEEK
+  const progressText = useTransform(sessionProgressMv, (p) => `${Math.round(p * 100)}%`)
 
   const handleGestures = usePointerSwipeVertical({
     onSwipeUp: () => onOpenChange(true),
@@ -133,9 +135,11 @@ export const BottomSheet = ({
             </div>
             <div className="rounded-xl bg-white/[0.04] px-3 py-2.5">
               <dt className="text-[10px] uppercase tracking-wider text-cyan-100/45">Progress</dt>
-              <dd className="mt-1 tabular-nums text-cyan-100/90">
-                {isSessionActive && targetRounds ? `${Math.round(sessionProgress * 100)}%` : '—'}
-              </dd>
+              {isSessionActive && targetRounds ? (
+                <motion.dd className="mt-1 tabular-nums text-cyan-100/90">{progressText}</motion.dd>
+              ) : (
+                <dd className="mt-1 tabular-nums text-cyan-100/90">—</dd>
+              )}
             </div>
           </dl>
         </motion.div>

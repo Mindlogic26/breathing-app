@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useReducer, useRef, useState } from 'react'
+import { type MotionValue, useAnimationFrame, useMotionValue, useTransform } from 'framer-motion'
+import { useCallback, useEffect, useMemo, useReducer, useRef } from 'react'
 
 export const PHASE_ORDER = ['Inhale', 'Hold In', 'Exhale', 'Hold Out'] as const
 
@@ -65,7 +66,11 @@ export const useBreathCycle = (pattern: UseBreathCyclePattern, options: UseBreat
     completedRounds: 0,
     phaseStartedAt: window.performance.now(),
   }))
-  const [now, setNow] = useState(() => window.performance.now())
+  /**
+   * Continuous clock (performance.now() ms) as a MotionValue, not React state: it updates every
+   * frame and must not re-render App. Only discrete changes (phase, rounds) live in state.
+   */
+  const clockMv = useMotionValue(window.performance.now())
   const prevActiveRef = useRef(active)
 
   const { phaseIndex, completedRounds, phaseStartedAt } = cycle
@@ -85,7 +90,15 @@ export const useBreathCycle = (pattern: UseBreathCyclePattern, options: UseBreat
   const phase = PHASE_ORDER[phaseIndex]
   const phaseDurationMs = durationMsByPhase[phaseIndex]
   const totalCycleTimeMs = durationMsByPhase.reduce((sum, durationMs) => sum + durationMs, 0)
-  const phaseElapsedMs = Math.min(Math.max(0, now - phaseStartedAt), phaseDurationMs)
+
+  /**
+   * Elapsed ms in the current phase, derived from the clock and the discrete phase start.
+   * The transformer is re-bound on every render, so a phase change never pairs the new phase
+   * with a stale elapsed value. Held at 0 once the round cap is reached (session complete).
+   */
+  const phaseElapsedMv: MotionValue<number> = useTransform(clockMv, (nowMs) =>
+    mayAdvancePhases ? Math.min(Math.max(0, nowMs - phaseStartedAt), phaseDurationMs) : 0,
+  )
 
   useEffect(() => {
     const wasActive = prevActiveRef.current
@@ -94,12 +107,12 @@ export const useBreathCycle = (pattern: UseBreathCyclePattern, options: UseBreat
     if (active === wasActive) return
 
     // Reset on any active transition. Ending a session clears state; starting again must
-    // re-sync phaseStartedAt with `now` — otherwise idle time makes phaseElapsedMs jump to
+    // re-sync phaseStartedAt with the clock — otherwise idle time makes the elapsed time jump to
     // the end of the first phase and the progress ring looks partially filled.
     const t = window.performance.now()
     dispatch({ type: 'reset', t })
-    setNow(t)
-  }, [active])
+    clockMv.set(t)
+  }, [active, clockMv])
 
   useEffect(() => {
     if (!active || !mayAdvancePhases) return
@@ -118,26 +131,17 @@ export const useBreathCycle = (pattern: UseBreathCyclePattern, options: UseBreat
     }
   }, [active, mayAdvancePhases, phaseDurationMs, phaseIndex])
 
-  useEffect(() => {
-    if (!active) return
-
-    let animationFrameId: number
-    const tick = (timestamp: number) => {
-      setNow(timestamp)
-      animationFrameId = window.requestAnimationFrame(tick)
-    }
-
-    animationFrameId = window.requestAnimationFrame(tick)
-    return () => {
-      window.cancelAnimationFrame(animationFrameId)
-    }
-  }, [active])
+  /** Framer's frame loop writes the clock; MotionValue subscribers update the DOM without a render. */
+  const tickClock = useCallback(() => {
+    if (active) clockMv.set(window.performance.now())
+  }, [active, clockMv])
+  useAnimationFrame(tickClock)
 
   return {
     phase,
     phaseIndex,
     phaseDurationMs,
-    phaseElapsedMs,
+    phaseElapsedMv,
     phaseDurationSeconds: durations[phaseIndex] ?? 0,
     totalCycleTimeMs,
     durationMsByPhase,

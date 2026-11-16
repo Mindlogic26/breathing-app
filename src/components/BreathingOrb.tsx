@@ -1,4 +1,4 @@
-import { motion, useAnimationControls, useMotionValue } from 'framer-motion'
+import { type MotionValue, motion, useAnimationControls, useTransform } from 'framer-motion'
 import { useLayoutEffect } from 'react'
 
 import { getSessionOrbScale, useOrbAnimation } from '../hooks/useOrbAnimation'
@@ -8,7 +8,8 @@ type BreathingOrbProps = {
   isSessionActive: boolean
   phase: BreathPhase
   phaseDurationMs: number
-  phaseElapsedMs: number
+  /** Continuous elapsed ms in the current phase (MotionValue — no re-render per frame). */
+  phaseElapsedMv: MotionValue<number>
   /** When true, hold the orb at its current transform (no idle scale jump) — e.g. natural session end. */
   freezeForSessionComplete?: boolean
 }
@@ -31,12 +32,19 @@ const BreathingOrb = ({
   isSessionActive,
   phase,
   phaseDurationMs,
-  phaseElapsedMs,
+  phaseElapsedMv,
   freezeForSessionComplete = false,
 }: BreathingOrbProps) => {
   const sessionVisualActive = isSessionActive || freezeForSessionComplete
   const idleConfig = useOrbAnimation(sessionVisualActive)
-  const scaleMv = useMotionValue(0.8)
+  /**
+   * Session scale derived from the elapsed MotionValue; Framer writes it to the DOM each frame
+   * without a React render. After completion the cycle holds elapsed at 0 (Inhale start = 0.8,
+   * which is where every pattern ends), so the orb stays put while it fades out.
+   */
+  const scaleMv = useTransform(phaseElapsedMv, (elapsedMs) =>
+    getSessionOrbScale(phase, elapsedMs, phaseDurationMs),
+  )
   const controls = useAnimationControls()
 
   useLayoutEffect(() => {
@@ -48,11 +56,6 @@ const BreathingOrb = ({
     const { animate, transition } = idleConfig
     void controls.start({ ...(animate as object), transition } as Parameters<typeof controls.start>[0])
   }, [sessionVisualActive, idleConfig, controls])
-
-  useLayoutEffect(() => {
-    if (!isSessionActive || freezeForSessionComplete) return
-    scaleMv.set(getSessionOrbScale(phase, phaseElapsedMs, phaseDurationMs))
-  }, [isSessionActive, freezeForSessionComplete, phase, phaseElapsedMs, phaseDurationMs, scaleMv])
 
   return (
     <motion.div

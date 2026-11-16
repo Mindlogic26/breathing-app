@@ -15,18 +15,19 @@ export const useBreathSession = (
     active: isActive,
     targetRounds: isActive ? targetRounds : undefined,
   })
-  const { progress: sessionProgress, currentRound } = useSessionProgress({
+  const { roundProgressMv, sessionProgressMv, currentRound } = useSessionProgress({
     isActive,
     targetRounds,
     completedRounds: cycle.completedRounds,
     phaseIndex: cycle.phaseIndex,
-    phaseElapsedMs: cycle.phaseElapsedMs,
+    phaseElapsedMv: cycle.phaseElapsedMv,
     durationMsByPhase: cycle.durationMsByPhase,
   })
 
   return {
     ...cycle,
-    sessionProgress,
+    roundProgressMv,
+    sessionProgressMv,
     currentRound,
   }
 }
