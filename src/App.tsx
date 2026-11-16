@@ -63,20 +63,7 @@ const PATTERNS: BreathPattern[] = [
   },
 ]
 
-declare global {
-  interface Window {
-    /** TEMPORARY: App render (commit) count, read from outside to check the session doesn't re-render per frame. */
-    __breathRenders?: number
-  }
-}
-
 function App() {
-  // TEMPORARY render counter, shipped in the normal build on purpose so it can be measured on the
-  // deployed app. Counts commits (in production every render commits). Remove once verified.
-  useEffect(() => {
-    window.__breathRenders = (window.__breathRenders ?? 0) + 1
-  })
-
   const [isSessionActive, setSessionActive] = useState(false)
   const [configDrawerOpen, setConfigDrawerOpen] = useState(false)
   const [confirmEndOpen, setConfirmEndOpen] = useState(false)
