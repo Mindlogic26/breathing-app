@@ -87,6 +87,8 @@ function App() {
   }, [activePatternId, activePattern.durations, customDraftDurations])
 
   const prepMaxRounds = maxRoundsForCycle(prepIntervals)
+  /** A 0s cycle (all Custom intervals at 0) never advances: phase, orb and ring stay frozen. */
+  const canStartSession = sumCycleSeconds(prepIntervals) > 0
 
   const prepTotalSessionSec = useMemo(
     () => sumCycleSeconds(prepIntervals) * prepRounds,
@@ -243,6 +245,7 @@ function App() {
   }
 
   const handleStartSession = () => {
+    if (!canStartSession) return
     // Must run synchronously inside the tap (iOS): audio session + silent buffer + resume.
     unlockAudio()
 
@@ -514,6 +517,7 @@ function App() {
               customDraftDurations={customDraftDurations}
               onCustomDraftChange={handleCustomDraftChange}
               totalSessionDurationSec={prepTotalSessionSec}
+              canStartSession={canStartSession}
               onStartSession={handleStartSession}
             />
           ) : null}

@@ -87,6 +87,8 @@ type ConfigDrawerProps = {
   customDraftDurations: BreathCycleDurations
   onCustomDraftChange: (durations: BreathCycleDurations) => void
   totalSessionDurationSec: number
+  /** False when the cycle is 0s (all Custom intervals at 0). */
+  canStartSession: boolean
   onStartSession: () => void
 }
 
@@ -103,6 +105,7 @@ export const ConfigDrawer = ({
   customDraftDurations,
   onCustomDraftChange,
   totalSessionDurationSec,
+  canStartSession,
   onStartSession,
 }: ConfigDrawerProps) => {
   const handleGestures = usePointerSwipeVertical({
@@ -250,12 +253,17 @@ export const ConfigDrawer = ({
                       {formatTotal(totalSessionDurationSec)}
                     </span>
                   </p>
-                  <p className="mt-0.5 text-[10px] text-cyan-100/35">One full cycle × rounds</p>
+                  <p className="mt-0.5 text-[10px] text-cyan-100/35">
+                    {canStartSession
+                      ? 'One full cycle × rounds'
+                      : 'Set at least one interval above 0s to start'}
+                  </p>
                 </div>
                 <button
                   type="button"
                   onClick={onStartSession}
-                  className="mt-2 w-full rounded-2xl bg-cyan-500/28 py-[1.15rem] text-base font-semibold tracking-wide text-cyan-50 shadow-[0_8px_28px_rgba(34,211,238,0.12)] transition-colors hover:bg-cyan-500/38 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/45 active:bg-cyan-500/32 touch-manipulation"
+                  disabled={!canStartSession}
+                  className="mt-2 w-full rounded-2xl bg-cyan-500/28 py-[1.15rem] text-base font-semibold tracking-wide text-cyan-50 shadow-[0_8px_28px_rgba(34,211,238,0.12)] transition-colors hover:bg-cyan-500/38 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/45 active:bg-cyan-500/32 touch-manipulation disabled:cursor-not-allowed disabled:bg-white/[0.05] disabled:text-cyan-50/35 disabled:shadow-none"
                 >
                   Start session
                 </button>
