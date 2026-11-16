@@ -7,6 +7,12 @@ import { ORB_RING_DIAMETER_FACTOR, ORB_SESSION_MAX_SCALE } from '../hooks/useOrb
 const GAP_DEG = 2.5
 
 /**
+ * Up to this many rounds the ring shows one arc per round. Above it the arcs get too
+ * small to count at a glance, so the ring becomes one continuous arc for the whole session.
+ */
+const MAX_SEGMENTED_ROUNDS = 12
+
+/**
  * Circle radius in viewBox 0–100: r=50 → path diameter equals SVG box width (stroke may extend slightly; overflow visible).
  */
 const R = 50
@@ -16,7 +22,7 @@ const STROKE_USER = 0.4
 type OrbSessionRingProps = {
   completedRounds: number
   partialRoundProgress: number
-  /** Ring is divided into this many arcs — one per session round. */
+  /** Up to MAX_SEGMENTED_ROUNDS: one arc per round. Above: one continuous arc. */
   targetRounds: number
   isSessionActive: boolean
 }
@@ -42,7 +48,10 @@ const buildCompletedDashArray = (
 }
 
 /**
- * Static viewport-centered progress ring. One arc per round; fills smoothly within each round.
+ * Static viewport-centered progress ring.
+ * - Up to MAX_SEGMENTED_ROUNDS: one arc per round; fills smoothly within each round.
+ * - Above: one continuous arc filling over the whole session, still advancing smoothly within
+ *   the current round (the only motion during long holds, e.g. 4-7-8's 7s hold).
  * Dash updates are not tweened (duration 0) so round boundaries don't interpolate into a multi-segment sweep.
  */
 export const OrbSessionRing = ({
@@ -83,6 +92,9 @@ export const OrbSessionRing = ({
 
   if (!isSessionActive) return null
 
+  const isContinuous = segmentCount > MAX_SEGMENTED_ROUNDS
+  const sessionProgress = Math.min(1, (completedCap + safePartial) / segmentCount)
+
   return (
     <svg
       className="pointer-events-none block h-[calc(13rem*var(--orb-max)*var(--ring-diam))] w-[calc(13rem*var(--orb-max)*var(--ring-diam))] shrink-0 overflow-visible sm:h-[calc(18rem*var(--orb-max)*var(--ring-diam))] sm:w-[calc(18rem*var(--orb-max)*var(--ring-diam))]"
@@ -95,19 +107,8 @@ export const OrbSessionRing = ({
       preserveAspectRatio="xMidYMid meet"
       aria-hidden
     >
-      <g transform="rotate(-90 50 50)">
-        <circle
-          cx={50}
-          cy={50}
-          r={R}
-          fill="none"
-          stroke="rgba(165, 243, 252, 1)"
-          strokeWidth={STROKE_USER}
-          strokeLinecap="round"
-          strokeDasharray={dasharrayTrack}
-          style={{ opacity: 0.2 }}
-        />
-        {completedCap > 0 ? (
+      {isContinuous ? (
+        <g transform="rotate(-90 50 50)">
           <circle
             cx={50}
             cy={50}
@@ -115,12 +116,8 @@ export const OrbSessionRing = ({
             fill="none"
             stroke="rgba(165, 243, 252, 1)"
             strokeWidth={STROKE_USER}
-            strokeLinecap="round"
-            strokeDasharray={completedDasharray}
-            style={{ opacity: 0.55 }}
+            style={{ opacity: 0.2 }}
           />
-        ) : null}
-        {completedCap < segmentCount ? (
           <motion.circle
             cx={50}
             cy={50}
@@ -130,14 +127,55 @@ export const OrbSessionRing = ({
             strokeWidth={STROKE_USER}
             strokeLinecap="round"
             style={{ opacity: 0.92 }}
-            animate={{
-              strokeDasharray: currentStrokeDasharray,
-              strokeDashoffset: currentStrokeDashoffset,
-            }}
+            animate={{ strokeDasharray: `${circ * sessionProgress} ${circ}` }}
             transition={{ duration: 0 }}
           />
-        ) : null}
-      </g>
+        </g>
+      ) : (
+        <g transform="rotate(-90 50 50)">
+          <circle
+            cx={50}
+            cy={50}
+            r={R}
+            fill="none"
+            stroke="rgba(165, 243, 252, 1)"
+            strokeWidth={STROKE_USER}
+            strokeLinecap="round"
+            strokeDasharray={dasharrayTrack}
+            style={{ opacity: 0.2 }}
+          />
+          {completedCap > 0 ? (
+            <circle
+              cx={50}
+              cy={50}
+              r={R}
+              fill="none"
+              stroke="rgba(165, 243, 252, 1)"
+              strokeWidth={STROKE_USER}
+              strokeLinecap="round"
+              strokeDasharray={completedDasharray}
+              style={{ opacity: 0.55 }}
+            />
+          ) : null}
+          {completedCap < segmentCount ? (
+            <motion.circle
+              cx={50}
+              cy={50}
+              r={R}
+              fill="none"
+              stroke="rgba(165, 243, 252, 1)"
+              strokeWidth={STROKE_USER}
+              strokeLinecap="round"
+              style={{ opacity: 0.92 }}
+              animate={{
+                strokeDasharray: currentStrokeDasharray,
+                strokeDashoffset: currentStrokeDashoffset,
+              }}
+              transition={{ duration: 0 }}
+            />
+          ) : null}
+        </g>
+      )}
     </svg>
   )
 }
