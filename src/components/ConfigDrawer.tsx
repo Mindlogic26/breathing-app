@@ -34,8 +34,6 @@ const sheetTransition = {
   mass: 0.9,
 }
 
-export { clampPrepRounds } from '../lib/prepConstraints'
-
 type IntervalStepperProps = {
   label: string
   value: number
@@ -83,6 +81,8 @@ type ConfigDrawerProps = {
   customPatternId: string
   onActivePatternIdChange: (id: string) => void
   prepRounds: number
+  /** Max rounds for the selected pattern's cycle. */
+  prepMaxRounds: number
   onPrepRoundsChange: (rounds: number) => void
   customDraftDurations: BreathCycleDurations
   onCustomDraftChange: (durations: BreathCycleDurations) => void
@@ -98,6 +98,7 @@ export const ConfigDrawer = ({
   customPatternId,
   onActivePatternIdChange,
   prepRounds,
+  prepMaxRounds,
   onPrepRoundsChange,
   customDraftDurations,
   onCustomDraftChange,
@@ -233,7 +234,12 @@ export const ConfigDrawer = ({
 
             <div className="shrink-0 border-t border-white/[0.1] bg-[#060608]/95 px-4 pt-3 backdrop-blur-md">
               <div className="mx-auto w-full max-w-lg pb-[max(0.75rem,env(safe-area-inset-bottom))]">
-                <PrepRoundsSlider comfortable value={prepRounds} onChange={onPrepRoundsChange} />
+                <PrepRoundsSlider
+                  comfortable
+                  value={prepRounds}
+                  maxRounds={prepMaxRounds}
+                  onChange={onPrepRoundsChange}
+                />
                 <div className="border-t border-white/[0.06] px-0 py-3">
                   <p className="text-[10px] uppercase tracking-[0.18em] text-cyan-100/45">
                     Session configuration

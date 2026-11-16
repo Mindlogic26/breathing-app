@@ -19,7 +19,12 @@ import { chromeFadeTransition } from './constants/uiMotion'
 import type { BreathCycleDurations, UseBreathCyclePattern } from './hooks/useBreathCycle'
 import { useBreathSession } from './hooks/useBreathSession'
 import { useTouchRevealUi } from './hooks/useTouchRevealUi'
-import { clampPrepRounds, DEFAULT_PREP_ROUNDS, sumCycleSeconds } from './lib/prepConstraints'
+import {
+  clampPrepRounds,
+  DEFAULT_PREP_ROUNDS,
+  maxRoundsForCycle,
+  sumCycleSeconds,
+} from './lib/prepConstraints'
 import {
   createSessionAmbient,
   playCompletionBell,
@@ -81,10 +86,30 @@ function App() {
     return activePattern.durations
   }, [activePatternId, activePattern.durations, customDraftDurations])
 
+  const prepMaxRounds = maxRoundsForCycle(prepIntervals)
+
   const prepTotalSessionSec = useMemo(
     () => sumCycleSeconds(prepIntervals) * prepRounds,
     [prepIntervals, prepRounds],
   )
+
+  /** Switching pattern can lower the max (e.g. Coherent 60 → 4-7-8 32): clamp rounds in the same update. */
+  const handleActivePatternIdChange = (id: string) => {
+    const durations =
+      id === CUSTOM_PATTERN_ID
+        ? customDraftDurations
+        : (PATTERNS.find((pattern) => pattern.id === id) ?? PATTERNS[0]).durations
+    setActivePatternId(id)
+    setPrepRounds((rounds) => clampPrepRounds(rounds, maxRoundsForCycle(durations)))
+  }
+
+  /** Lengthening Custom intervals lowers its max: clamp rounds alongside. */
+  const handleCustomDraftChange = (durations: BreathCycleDurations) => {
+    setCustomDraftDurations(durations)
+    if (activePatternId === CUSTOM_PATTERN_ID) {
+      setPrepRounds((rounds) => clampPrepRounds(rounds, maxRoundsForCycle(durations)))
+    }
+  }
 
   const idleCyclePattern = useMemo((): UseBreathCyclePattern => {
     if (activePatternId === CUSTOM_PATTERN_ID) return customDraftDurations
@@ -232,7 +257,7 @@ function App() {
     ambientRef.current?.dispose()
     ambientRef.current = createSessionAmbient({ peakGain: 0.052, fadeInSec: 3.5 })
 
-    const rounds = clampPrepRounds(prepRounds)
+    const rounds = clampPrepRounds(prepRounds, prepMaxRounds)
     setPrepRounds(rounds)
     setActiveSessionRounds(rounds)
     if (activePatternId === CUSTOM_PATTERN_ID) {
@@ -482,11 +507,12 @@ function App() {
               patterns={PATTERNS}
               activePatternId={activePatternId}
               customPatternId={CUSTOM_PATTERN_ID}
-              onActivePatternIdChange={setActivePatternId}
+              onActivePatternIdChange={handleActivePatternIdChange}
               prepRounds={prepRounds}
-              onPrepRoundsChange={(n) => setPrepRounds(clampPrepRounds(n))}
+              prepMaxRounds={prepMaxRounds}
+              onPrepRoundsChange={(n) => setPrepRounds(clampPrepRounds(n, prepMaxRounds))}
               customDraftDurations={customDraftDurations}
-              onCustomDraftChange={setCustomDraftDurations}
+              onCustomDraftChange={handleCustomDraftChange}
               totalSessionDurationSec={prepTotalSessionSec}
               onStartSession={handleStartSession}
             />
