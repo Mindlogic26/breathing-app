@@ -16,7 +16,7 @@
 export type AudioDiagnostics = {
   /** AudioContext state, or 'none' if never created / unsupported. */
   ctxState: string
-  /** 'playback' when set, 'no disponible' when the API doesn't exist, or the error. */
+  /** 'playback' when set, 'unavailable' when the API doesn't exist, or the error. */
   audioSession: string
   /** Result of the last unlock attempt from a tap. */
   unlock: string
@@ -60,7 +60,7 @@ const getSharedAudioContext = (): AudioContext | null => {
     window.AudioContext ||
     (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
   if (!AC) {
-    setDiag({ ctxState: 'no soportado' })
+    setDiag({ ctxState: 'unsupported' })
     return null
   }
   const ctx = new AC()
@@ -73,7 +73,7 @@ const getSharedAudioContext = (): AudioContext | null => {
 const setPlaybackAudioSession = () => {
   const session = (navigator as unknown as { audioSession?: { type: string } }).audioSession
   if (!session) {
-    setDiag({ audioSession: 'no disponible' })
+    setDiag({ audioSession: 'unavailable' })
     return
   }
   try {
@@ -93,7 +93,7 @@ export function unlockAudio(): AudioContext | null {
   setPlaybackAudioSession()
   const ctx = getSharedAudioContext()
   if (!ctx) {
-    setDiag({ unlock: 'sin AudioContext' })
+    setDiag({ unlock: 'no AudioContext' })
     return null
   }
   try {
@@ -104,13 +104,13 @@ export function unlockAudio(): AudioContext | null {
     src.start(0)
     src.onended = () => src.disconnect()
   } catch (err) {
-    setDiag({ unlock: `buffer falló: ${String(err)}` })
+    setDiag({ unlock: `silent buffer failed: ${String(err)}` })
   }
-  setDiag({ unlock: `toque (estado: ${ctx.state})` })
+  setDiag({ unlock: `tap (state: ${ctx.state})` })
   ctx
     .resume()
     .then(() => setDiag({ unlock: `ok (${ctx.state})`, ctxState: ctx.state }))
-    .catch((err) => setDiag({ unlock: `resume falló: ${String(err)}` }))
+    .catch((err) => setDiag({ unlock: `resume failed: ${String(err)}` }))
   return ctx
 }
 
@@ -199,7 +199,7 @@ export type CreateSessionAmbientOptions = {
 export function createSessionAmbient(options: CreateSessionAmbientOptions): SessionAmbientHandle | null {
   const ctx = getSharedAudioContext()
   if (!ctx) {
-    setDiag({ ambient: 'sin AudioContext' })
+    setDiag({ ambient: 'no AudioContext' })
     return null
   }
 
@@ -231,7 +231,7 @@ export function createSessionAmbient(options: CreateSessionAmbientOptions): Sess
   let started = false
   let disposed = false
 
-  setDiag({ ambient: ctx.state === 'running' ? 'arrancando' : `esperando running (${ctx.state})` })
+  setDiag({ ambient: ctx.state === 'running' ? 'starting' : `waiting for running (${ctx.state})` })
 
   const cancelWait = whenRunning(
     ctx,
@@ -245,10 +245,10 @@ export function createSessionAmbient(options: CreateSessionAmbientOptions): Sess
       master.gain.linearRampToValueAtTime(peakGain, t0 + Math.max(0.05, fadeInSec))
       omGain.gain.linearRampToValueAtTime(peakGain * 0.22, t0 + Math.max(0.05, fadeInSec))
       started = true
-      setDiag({ ambient: 'sonando' })
+      setDiag({ ambient: 'playing' })
     },
     5000,
-    () => setDiag({ ambient: `no arrancó (estado: ${ctx.state})` }),
+    () => setDiag({ ambient: `did not start (state: ${ctx.state})` }),
   )
 
   const fadeOut = (durationSec: number) => {
@@ -261,7 +261,7 @@ export function createSessionAmbient(options: CreateSessionAmbientOptions): Sess
       omGain.gain.cancelScheduledValues(t)
       omGain.gain.setValueAtTime(omGain.gain.value, t)
       omGain.gain.linearRampToValueAtTime(0, t + Math.max(0.05, durationSec))
-      setDiag({ ambient: 'fundiendo' })
+      setDiag({ ambient: 'fading out' })
     } catch {
       /* ignore */
     }
@@ -285,7 +285,7 @@ export function createSessionAmbient(options: CreateSessionAmbientOptions): Sess
     } catch {
       /* ignore */
     }
-    setDiag({ ambient: 'parado' })
+    setDiag({ ambient: 'stopped' })
   }
 
   return { fadeOut, dispose }
@@ -302,10 +302,10 @@ export function createSessionAmbient(options: CreateSessionAmbientOptions): Sess
 export function playCompletionBell(): void {
   const ctx = sharedCtx && sharedCtx.state !== 'closed' ? sharedCtx : null
   if (!ctx) {
-    setDiag({ bell: 'sin contexto desbloqueado' })
+    setDiag({ bell: 'no unlocked context' })
     return
   }
-  setDiag({ bell: ctx.state === 'running' ? 'programando' : `esperando running (${ctx.state})` })
+  setDiag({ bell: ctx.state === 'running' ? 'scheduling' : `waiting for running (${ctx.state})` })
   whenRunning(
     ctx,
     () => {
@@ -325,14 +325,14 @@ export function playCompletionBell(): void {
         osc.onended = () => {
           osc.disconnect()
           gain.disconnect()
-          setDiag({ bell: 'sonó' })
+          setDiag({ bell: 'played' })
         }
-        setDiag({ bell: `programada (t=${t.toFixed(2)}s)` })
+        setDiag({ bell: `scheduled (t=${t.toFixed(2)}s)` })
       } catch (err) {
         setDiag({ bell: `error: ${String(err)}` })
       }
     },
     3000,
-    () => setDiag({ bell: `bloqueada (estado: ${ctx.state})` }),
+    () => setDiag({ bell: `blocked (state: ${ctx.state})` }),
   )
 }
